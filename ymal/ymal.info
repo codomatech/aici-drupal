@@ -1,0 +1,5 @@
+name = You-May-Also-Like: a submodule of AI-Powered Customer Insights
+description = You-May-Also-Like, a submodule of AI-Powered Customer Insights (https://codoma.tech/aici/).
+core = 7.x
+package = AICI
+configure = admin/config/aici-ymal

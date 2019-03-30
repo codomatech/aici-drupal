@@ -1,0 +1,330 @@
+<?php
+
+/**
+ * @file
+ * ymal provides related contents optimizing conversions/
+ * a submodule of AI-Powered Customer Insights (https://codoma.tech/aici/)
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function ymal_menu()
+{
+    $items = array();
+
+    $items['admin/config/aici-ymal'] = array(
+      'type' => MENU_NORMAL_ITEM,
+      'title' => 'You-May-Also-Like - AI-Powered Customer Insights',
+      'description' => 'Configure YMAL.',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('ymal_config_form'),
+      'access arguments' => array('administer aici'),
+    );
+
+    return $items;
+}
+
+function ymal_config_form($form, &$form_state)
+{
+    $ctypes = array();
+    foreach (node_type_get_types() as $_ => $type) {
+        $ctypes[$type->type] = $type->name;
+    }
+
+    $vids = array();
+    foreach (taxonomy_get_vocabularies() as $_ => $v) {
+        $vids[$v->vid] = $v->name;
+    }
+    $curvids = variable_get('aici_ymal_vocabularies', array());
+
+    $form['aici_ymal_main_types'] = array(
+        '#title' => t('Main Entity Types'),
+        '#type' => 'checkboxes',
+        '#default_value' => variable_get('aici_ymal_main_types', array()),
+        '#options' => $ctypes,
+        '#description' => t('Which entity types should users be encouraged to view? e.g. articles, product pages'),
+        '#required' => true,
+    );
+
+    $form['aici_ymal_target_types'] = array(
+        '#title' => t('Target Entity Types'),
+        '#type' => 'checkboxes',
+        '#default_value' => variable_get('aici_ymal_target_types', array()),
+        '#options' => array('comment' => 'Comments'),
+        '#description' => t('Which do we want users to create more of? e.g. article comments/shares/up-votes, orders'),
+        '#required' => true,
+    );
+
+    $form['aici_ymal_vocabularies'] = array(
+        '#title' => t('Vocabularies'),
+        '#type' => 'checkboxes',
+        '#default_value' => $curvids,
+        '#options' => $vids,
+        '#description' => t('Which vocabularies are used to categorize your main entites? <em>Note that uncategorized content cannot be processed by this module.</em>'),
+        '#required' => true,
+    );
+
+    // category 2 related category
+    $curvids = _ymal_get_checkboxes_value($curvids);
+    if (count($curvids) > 0) {
+        $dbres = db_query(
+            'SELECT tid, name FROM taxonomy_term_data WHERE vid IN (:vids)',
+            array(':vids' => $curvids)
+        );
+        $records = array();
+        $cats = array();
+        foreach ($dbres as $record) {
+            $records[] = $record;
+            $cats[$record->tid] = $record->name;
+        }
+
+        $relcatsfieldset = array(
+            '#type' => 'fieldset',
+            '#title' => t('Categories Relationships'),
+            '#description' => t('For each category, which are the 3 most relevant categories? <em>most relevant first.'),
+            '#collapsible' => true,
+            '#collapsed' => 0,
+        );
+
+        foreach ($records as $record) {
+            $fieldset = array(
+                '#type' => 'fieldset',
+                '#description' => "Category <strong>`{$record->name}`</strong> ",
+                '#prefix' => '<div class="container-inline">',
+                '#suffix' => '</div>',
+            );
+            $opts = $cats;
+            unset($opts[$record->tid]);
+            for ($i = 0; $i < 3; ++$i) {
+                $varname = "aici_ymal_cat2relcat_{$record->tid}_{$i}";
+                $fieldset[$varname] = array(
+                    '#type' => 'select',
+                    '#default_value' => variable_get($varname),
+                    '#options' => $opts,
+                    '#required' => true,
+                );
+            }
+            $relcatsfieldset["aici_ymal_cat2relcat_{$record->tid}"] = $fieldset;
+        }
+    }
+    $form['relcats'] = $relcatsfieldset;
+
+    return system_settings_form($form);
+}
+
+/**
+ * Implements hook_help().
+ */
+function ymal_help($path, $arg)
+{
+    if ('admin/config/aici-ymal' == $path) {
+        return '<p>'.t('Configure the parameters of "You May Also Like" module.').'</p>';
+    }
+}
+
+function ymal_block_info()
+{
+    $blocks = array();
+
+    $blocks['aici-ymal'] = array(
+    'info' => t('You May Also Like'),
+  );
+
+    return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function ymal_block_view($delta = '')
+{
+    $block = array();
+    $eids = _ymal_get_top_entities();
+    $nodes = array_map(function ($nid) { return node_load($nid); }, $eids);
+
+    switch ($delta) {
+    case 'aici-ymal':
+      $content = _ymal_default_block_theme($nodes);
+      $block['content'] = drupal_render($content);
+      break;
+  }
+
+    return $block;
+}
+
+function _ymal_default_block_theme($nodes)
+{
+    $wrapper = array(
+        '#type' => 'container',
+        '#attributes' => array(
+            'class' => array('ymal-block-container'),
+        ),
+    );
+    $wrapper['title'] = array(
+        '#type' => 'markup',
+        '#markup' => '<h3>You may also like</h3>',
+    );
+    foreach ($nodes as $node) {
+        $wrapper["entity-{$node->nid}"] = node_view($node, 'teaser');
+    }
+
+    return $wrapper;
+}
+
+function _ymal_score($x)
+{
+    $coef = array(
+        'pop' => 0.010654232243961352,
+        'nb' => 0.04779691485370457,
+        'nv' => -0.20580252026474452,
+        'cnb' => 0.03054912717351691,
+        'cnv' => -0.10186363397806664,
+        'cnb0' => 0.021938907804977134,
+        'cnv0' => -0.004290257333829337,
+        'cnb1' => -0.0029952932804330843,
+        'cnv1' => -0.005690344140748764,
+        'cnb2' => -0.013551282871696156,
+        'cnv2' => -0.0009153761200677369,
+        'duration' => -0.0011817419644103544,
+    );
+    $l = 0;
+    foreach ($coef as $f => $c) {
+        $l += $c * log($x[$f] + 1e-6);
+    }
+
+    return 1 / (1 + exp(-$l));
+}
+
+function _ymal_get_checkboxes_value($arr)
+{
+    $ret = array();
+    foreach ($arr as $k => $v) {
+        if ($v) {
+            $ret[] = $k;
+        }
+    }
+
+    return $ret;
+}
+
+function _ymal_get_top_entities($N = 4)
+{
+    global $user;
+    $user_id = _aici_hash($user->uid);
+    $session = _aici_session();
+    $session_id = _aici_hash($session);
+
+    $mtypes = variable_get('aici_ymal_main_types', array());
+    $mtypes = _ymal_get_checkboxes_value($mtypes);
+    if (0 == count($mtypes)) {
+        return;
+    }
+
+    $ttypes = variable_get('aici_ymal_target_types', array());
+    $ttypes = _ymal_get_checkboxes_value($ttypes);
+    if (0 == count($ttypes)) {
+        return;
+    }
+
+    $vids = variable_get('aici_ymal_vocabularies', array());
+    $vids = _ymal_get_checkboxes_value($vids);
+
+    $dbres = db_query(
+        'SELECT tid FROM {taxonomy_term_data} WHERE vid IN (:vids)',
+        array(':vids' => $vids)
+    );
+    $cat2relcat = array();
+    foreach ($dbres as $record) {
+        $cat2relcat[$record->tid] = array();
+        for ($i = 0; $i < 3; ++$i) {
+            $varname = "aici_ymal_cat2relcat_{$record->tid}_{$i}";
+            $cat2relcat[$record->tid][] = variable_get($varname);
+        }
+    }
+
+    // collect user-independent features
+    $n = db_query(
+        'SELECT count(*) FROM {aici_log} WHERE etype IN (:ttypes) AND event = \'create\' LIMIT 1',
+        array(':ttypes' => $ttypes)
+        )->fetchField();
+
+    $dbres = db_query(
+        'SELECT eid, count(*) as n FROM {aici_log} WHERE etype IN (:ttypes) AND event = \'create\' GROUP BY eid',
+        array(':ttypes' => $ttypes));
+    $nid2popularity = array();
+    foreach ($dbres as $record) {
+        $nid2popularity[$record->eid] = $record->n / $n;
+    }
+
+    $dbres = db_query(
+        'SELECT eid AS nid, event, count(*) AS n, i.tid as cat FROM {aici_log} JOIN {taxonomy_index} i ON eid = nid JOIN taxonomy_term_data d ON i.tid = d.tid WHERE etype IN (:types) GROUP BY eid',
+        array(':types' => $mtypes)
+    );
+    $nhistory = array();
+    $node2cat = [];
+    foreach ($dbres as $record) {
+        $nhistory[$record->nid] = array('view' => 1, 'create' => 0);
+        $node2cat[$record->nid] = $record->cat;
+    }
+
+    $time = time();
+    $mintime = $time - 30 * 24 * 3600;
+    $alltypes = array_merge($mtypes, $ttypes);
+    $dbres = db_query(
+        'SELECT eid, event, count(*) AS n, i.tid AS category FROM {aici_log} JOIN {taxonomy_index} i ON eid = nid JOIN taxonomy_term_data d ON i.tid = d.tid WHERE time >= :mintime AND etype IN (:types) AND (user = :user OR session = :session) AND d.vid IN (:vids) GROUP BY eid, event LIMIT 1024',
+        array(':types' => $alltypes, ':mintime' => $mintime, ':user' => $user_id, ':session' => $session_id, ':vids' => $vids)
+    );
+
+    $chistory = [];
+    foreach ($dbres as $record) {
+        $nid = $record->eid;
+        $cat = $record->category;
+        if (!isset($chistory[$cat][$record->event])) {
+            $chistory[$cat][$record->event] = 0;
+        }
+        $chistory[$cat][$record->event] += $record->n;
+        $nhistory[$nid][$record->event] = $record->n;
+    }
+
+    // session duration
+    $t1 = db_query(
+        'SELECT time FROM {aici_log} WHERE (user = :user OR session = :session) AND time >= :mintime ORDER BY time LIMIT 1',
+        array(':mintime' => time() - 1 * 24 * 3600, ':user' => $user_id, ':session' => $session_id)
+        )->fetchField();
+    $sessionduration = ($time - $t1) / 3600;
+
+    $nid2score = array();
+    foreach ($nhistory as $nid => $info) {
+        $x = [];
+        $x['nv'] = intval(@$info['view']);
+        $x['nb'] = intval(@$info['create']);
+        $cat = @$node2cat[$nid];
+        if (!isset($cat)) {
+            continue;
+        }
+        $x['cnv'] = intval(@$chistory[$cat]['view']);
+        $x['cnb'] = intval(@$chistory[$cat]['create']);
+        $relcats = $cat2relcat[$cat];
+        for ($i = 0; $i < 3; ++$i) {
+            if ($i >= count($relcats)) {
+                $x["cnv$i"] = 0;
+                $x["cnb$i"] = 0;
+            } else {
+                $cat2 = $relcats[$i];
+                $x["cnv$i"] = intval(@$chistory[$cat2]['view']);
+                $x["cnb$i"] = intval(@$chistory[$cat2]['create']);
+            }
+        }
+
+        $pop = floatval(@$nid2popularity[$nid]);
+        $x['pop'] = $pop;
+        $x['duration'] = $sessionduration;
+        $nid2score[$nid] = _ymal_score($x) + $pop * 1e-6;
+    }
+
+    asort($nid2score);
+    $topn = array_slice(array_keys($nid2score), -$N);
+
+    return array_reverse($topn);
+}

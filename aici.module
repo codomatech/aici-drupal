@@ -1,0 +1,145 @@
+<?php
+
+/**
+ * @file
+ * The base module for AI-Powered Customer Insights (https://codoma.tech/aici/)
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function aici_menu()
+{
+    $items = array();
+
+    return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function aici_permission()
+{
+    return array(
+    'administer aici' => array(
+      'title' => t('Administer AICI'),
+      'description' => t('Set global settings for AICI.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_help().
+ */
+function aici_help($path, $arg)
+{
+}
+
+function aici_entity_view($entity)
+{
+    _aici_log_entity_operation($entity, 'view');
+}
+
+function aici_entity_insert($entity)
+{
+    _aici_log_entity_operation($entity, 'create');
+}
+
+function aici_entity_create($entity)
+{
+    _aici_log_entity_operation($entity, 'create');
+}
+
+function _aici_hash($str)
+{
+    return hash('sha256', $str);
+}
+
+function _aici_session()
+{
+    $SESSION['aici-yaml-session'] = ip_address().'-'.$_SERVER['HTTP_USER_AGENT'];
+
+    return $SESSION['aici-yaml-session'];
+}
+
+function _aici_log_entity_operation($entity, $op)
+{
+    global $user;
+
+    $entities = array();
+
+    // find any interesting entity
+    $entity_obj = (array) $entity;
+    array_walk_recursive($entity_obj, function (&$val, &$key) use (&$entities) {
+        if ('product_id' === $key) {
+            $entities[] = (object) array('id' => $val, 'type' => 'product');
+        }
+
+        if ('order_id' === $key) {
+            $query = "SELECT p.commerce_product_product_id
+                FROM {commerce_line_item} li JOIN {field_data_commerce_product} p
+                    ON (p.entity_id = li.line_item_id)
+                WHERE li.order_id = $val AND li.type = 'product'";
+            //die($query);
+            $product_ids = db_query($query)->fetchCol();
+            foreach ($product_ids as $product_id) {
+                $entities[] = (object) array('id' => $product_id, 'type' => 'product-order');
+            }
+        }
+    });
+
+    // handle the normal node case
+    if (isset($entity->nid)) {
+        $iscomment = isset($entity->cid) && $entity->cid > 0;
+        $type = $iscomment ? 'comment' : $entity->type;
+        if (false and $iscomment) {
+            $id = $entity->cid;
+        } else {
+            $id = $entity->nid;
+        }
+        $entities[] = (object) array('id' => $id, 'type' => $type);
+    }
+
+    // get shallow small pieces of info, just in case
+    $extra = array();
+    foreach ($entity_obj as $key => $val) {
+        if (false === is_array($val) && strlen($val) < 32) {
+            $extra[$key] = $val;
+        }
+    }
+
+    // finally store to db
+    $timestamp = isset($GLOBALS['aici-timestamp']) ? $GLOBALS['aici-timestamp'] : time();
+    $uid = $user->uid;
+    if (isset($GLOBALS['aici-uid'])) {
+        $uid = $GLOBALS['aici-uid'];
+    }
+
+    $sid = _aici_session();
+    if (isset($GLOBALS['aici-sid'])) {
+        $sid = $GLOBALS['aici-sid'];
+    }
+
+    unset($GLOBALS['aici-timestamp']);
+    unset($GLOBALS['aici-uid']);
+    unset($GLOBALS['aici-sid']);
+
+    $stored = array();
+    foreach ($entities as $e) {
+        if (isset($stored["{$e->type}#{$e->id}"])) {
+            continue;
+        }
+        $stored["{$e->type}#{$e->id}"] = 1;
+        db_insert('aici_log')
+            ->fields(array(
+                'event' => $op,
+                'user' => $uid > 0 ? _aici_hash($uid) : '-1',
+                'session' => _aici_hash($sid),
+                'etype' => $e->type,
+                'eid' => $e->id,
+                'time' => $timestamp,
+                'extra' => json_encode($extra),
+            ))
+            ->execute();
+    }
+}

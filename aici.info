@@ -1,0 +1,4 @@
+name = AI-Powered Customer Insights
+description = AI-Powered Customer Insights (https://codoma.tech/aici/).
+core = 7.x
+package = AICI

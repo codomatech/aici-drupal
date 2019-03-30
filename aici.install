@@ -1,0 +1,64 @@
+<?php
+
+/**
+ * @file
+ * Contains install and update functions for aici
+ */
+function aici_schema()
+{
+    $schema = array();
+    $schema['aici_log'] = array(
+        'description' => 'A log of all events of interest to AICI.',
+        'fields' => array(
+            'alid' => array(
+                'type' => 'serial',
+                'unsigned' => true,
+                'not null' => true,
+            ),
+            'event' => array(
+                'type' => 'varchar',
+                'length' => 64,
+                'not null' => true,
+            ),
+            'etype' => array(
+                'type' => 'varchar',
+                'length' => 64,
+                'not null' => true,
+            ),
+            'eid' => array(
+                'type' => 'varchar',
+                'length' => 64,
+                'not null' => true,
+            ),
+            'user' => array(
+                'type' => 'varchar',
+                'length' => 128,
+                'not null' => true,
+            ),
+            'session' => array(
+                'type' => 'varchar',
+                'length' => 128,
+                'not null' => true,
+            ),
+            'time' => array(
+                'type' => 'int',
+                'unsigned' => true,
+                'not null' => true,
+            ),
+            'extra' => array(
+                'type' => 'varchar',
+                'length' => 1024,
+                'not null' => false,
+            ),
+        ),
+        'indexes' => array(
+            'aici_log_user' => array('user'),
+            'aici_log_session' => array('session'),
+            'aici_log_etype' => array('etype'),
+            'aici_log_time' => array('time'),
+        ),
+        'primary key' => array('alid'),
+    );
+
+    return $schema;
+}

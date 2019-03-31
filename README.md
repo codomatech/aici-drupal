@@ -14,9 +14,9 @@ Drupal modules for [AI-based customer insights (AICI)](https://codoma.tech/aici/
 
 1. Enable the module `You-May-Also-Like`, this will enable the base module `aici` if it's not enabled.
 2. Configure the module at `admin/config/aici-ymal`
-2.a. The algorithm depends heavily on the categorization of your contents (i.e. terms),
+     1. The algorithm depends heavily on the categorization of your contents (i.e. terms),
      uncategorized contents cannot be processed
-2.b. Additionally, you need to tell the module how the various categories are related to each other
+     2. Additionally, you need to tell the module how the various categories are related to each other
      this can be configured in the 'categories Relationships' section of the admin page. The quality
      of this configuration affects the quality of the modules recommendations.
 3. The module provide a block of related categories
